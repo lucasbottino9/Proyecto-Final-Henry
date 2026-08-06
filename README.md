@@ -13,3 +13,11 @@ models/       # Artefactos de modelos
 notebooks/    # Notebooks de EDA, feature engineering y modelado
 src/          # Código fuente (carga de datos, preprocesamiento, métricas)
 ```
+
+## Uso
+
+Cargar el dataset y ver un resumen (filas, columnas, primeras filas):
+
+```bash
+python src/data_loader.py
+```
