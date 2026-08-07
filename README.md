@@ -31,3 +31,4 @@ python src/data_loader.py
 ## Notebooks
 
 - `notebooks/eda_final.ipynb`: EDA de referencia del proyecto (estructura, calidad de datos, distribución del target, análisis univariado/bivariado, outliers y correlaciones), consolidado a partir de los EDAs exploratorios previos.
+- `notebooks/01_eda_by_julian.ipynb`: EDA exploratorio original, con un primer modelo baseline (Random Forest) sobre el dataset.
