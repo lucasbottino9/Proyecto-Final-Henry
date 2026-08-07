@@ -16,8 +16,18 @@ src/          # Código fuente (carga de datos, preprocesamiento, métricas)
 
 ## Uso
 
+Instalar las dependencias del proyecto:
+
+```bash
+pip install -r requirements.txt
+```
+
 Cargar el dataset y ver un resumen (filas, columnas, primeras filas):
 
 ```bash
 python src/data_loader.py
 ```
+
+## Notebooks
+
+- `notebooks/eda_final.ipynb`: EDA de referencia del proyecto (estructura, calidad de datos, distribución del target, análisis univariado/bivariado, outliers y correlaciones), consolidado a partir de los EDAs exploratorios previos.
