@@ -1,3 +1,18 @@
+# Entornos virtuales
+venv/
 .venv/
+env/
+ENV/
+
+# Caché de Python
 __pycache__/
 *.pyc
+*.pyo
+
+# Temporal de Jupyter Notebooks
+.ipynb_checkpoints/
+
+# Archivos del sistema y configuración local
+.DS_Store
+Thumbs.db
+.env
