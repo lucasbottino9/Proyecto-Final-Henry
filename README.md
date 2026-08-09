@@ -45,16 +45,17 @@ Proyecto-Final-Henry/
 │   ├── processed/    # Datos limpios y matrices procesadas para modelado
 │   └── models/       # Artefactos y binarios de modelos (.pkl / .joblib)
 ├── docs/             # Registro formal de decisiones técnicas (ADR)
-├── models/           # Exportación de modelos y pipelines finalizados
 ├── notebooks/        # Cuadernos Jupyter del ciclo de vida analítico
 │   ├── EDA.ipynb                 # Análisis Exploratorio de Datos (EDA)
 │   ├── ETL.ipynb                 # Limpieza, validación y persistencia del dataset
 │   ├── feature_enginering.ipynb  # Feature engineering y preparación para modelado
-│   └── modeling_mvp.ipynb        # Entrenamiento Baseline, SMOTE y MVP
+│   └── modeling_mvp.ipynb        # Baseline, desbalance, ensembles y recomendador
 ├── src/              # Código fuente modular y reutilizable
 │   ├── data_loader.py               # Módulo de ingesta de datos
-│   ├── preprocessing.py             # Pipeline de ETL, OHE y Escalado
-│   └── metrics.py                   # Evaluación de métricas de negocio y ML
+│   ├── preprocessing.py             # Pipeline de ETL (limpieza, validación)
+│   ├── features.py                  # Feature engineering, split, OHE y escalado
+│   ├── metrics.py                   # Evaluación de modelos (precision/recall/F1/AUC)
+│   └── recommender.py               # Motor de recomendación (cross-selling/retención)
 ├── requirements.txt  # Dependencias del proyecto
 └── README.md         # Documentación principal del repositorio
 ```
@@ -100,15 +101,15 @@ Correr el pipeline de ETL (limpieza, validación y persistencia del dataset proc
 python -m src.preprocessing
 ```
 
-`src/preprocessing.py` también expone `procesar_etl` / `preparar_datos_modelo`, el pipeline de encoding (One-Hot) y escalado (`StandardScaler`) que usa `feature_enginering.ipynb` para armar la matriz de modelado:
+`src/features.py` arma la matriz de modelado a partir del dataset ya limpio (features derivadas, split train/test estratificado, encoding y escalado — ver detalle en `feature_enginering.ipynb`):
 
 ```python
-from src.data_loader import cargar_datos
-from src.preprocessing import preparar_datos_modelo
+from src.preprocessing import cargar_datos_procesados, COLUMNAS_CATEGORICAS
+from src.features import preparar_datos_modelado, guardar_artefactos_modelado
 
-df = cargar_datos()
-X_processed, y, preprocessor = preparar_datos_modelo(df)
-print(f"Matriz procesada lista para entrenamiento: {X_processed.shape}")
+df = cargar_datos_procesados()
+X_train, X_test, y_train, y_test, preprocessor = preparar_datos_modelado(df)
+guardar_artefactos_modelado(X_train, X_test, y_train, y_test, preprocessor)
 ```
 
 ## 📓 Notebooks
@@ -138,26 +139,25 @@ Toma el dataset crudo (el mismo que carga `EDA.ipynb`) y actúa sobre las decisi
 
 **¿Qué devuelve y para qué se usa?** El ETL devuelve un único dataset limpio (`data/processed/online_shoppers_intention_procesado.csv`), y ese mismo archivo se usa **para ambos destinos**, no uno u otro:
 
-- **`feature_enginering.ipynb` (modelado)**: lo recarga con `cargar_datos_procesados()` como punto de partida para encoding, escalado, features derivadas y split train/test. Lo necesita porque ahí es donde se decide qué hacer con los duplicados y outliers ya marcados (dropear o no, capar o no) según el modelo a entrenar — decisiones que el ETL deja documentadas pero no aplica.
-- **Dashboard de Power BI**: se conecta directamente a ese mismo CSV como fuente de datos. Lo necesita porque ya viene tipado, validado y con las columnas `Weekend_label`/`Revenue_label` legibles para negocio, sin tener que replicar la limpieza en Power BI.
+- **`feature_enginering.ipynb` (modelado)**: lo recarga con `cargar_datos_procesados()` como punto de partida para features derivadas, split train/test, encoding y escalado.
+- **Dashboard de Power BI**: se conecta directamente a ese mismo CSV como fuente de datos. Lo necesita porque ya viene tipado, validado, sin duplicados y con las columnas `Weekend_label`/`Revenue_label` legibles para negocio, sin tener que replicar la limpieza en Power BI.
 
-Es un único dataset para ambos casos (no dos archivos separados) para no mantener dos pipelines de limpieza que puedan divergir: la misma validación de esquema, tipos y filas vale tanto para entrenar el modelo como para lo que ve un analista en el dashboard. Cada consumidor aplica sus propias transformaciones adicionales (dropear duplicados, capar outliers, encoding) sobre su propia copia en memoria, sin modificar el archivo compartido — por eso el ETL marca en vez de eliminar (ver "Principales decisiones" abajo).
+Es un único dataset para ambos casos (no dos archivos separados) para que modelo y dashboard vean exactamente los mismos datos: la misma validación de esquema, tipos, duplicados y filas vale tanto para entrenar el modelo como para lo que ve un analista en el dashboard.
 
 Pasos del notebook:
 
 1. **Validación de esquema**: confirma, como invariante forzada, que las 18 columnas esperadas están presentes y que no hay valores nulos (por lo tanto no se requiere imputación).
 2. **Corrección de tipos**: `Weekend`/`Revenue` como `bool`; `Month`, `VisitorType`, `OperatingSystems`, `Browser`, `Region`, `TrafficType` como `category`.
-3. **Duplicados y outliers**: se detectan y marcan con columnas booleanas (`es_duplicado_exacto`, `outlier_<columna>`), pero **no se eliminan ni se capan** — ver "Principales decisiones" abajo.
-4. **Chequeos de consistencia**: invariantes duras (sin negativos, conteo=0 ⇒ duración=0) y hallazgos informativos (conteo>0 con duración≈0, rangos `[0,1]`).
-5. **Verificación de balance de clases** de `Revenue` (~85/15), sin corregirlo.
-6. **Etiquetas legibles** (`Weekend_label`, `Revenue_label`) pensadas para un dashboard de Power BI.
-7. **Persistencia**: guarda el resultado en `data/processed/online_shoppers_intention_procesado.csv`.
+3. **Duplicados**: se detectan y marcan (`es_duplicado_exacto`) para auditar cuántos había, y luego **se eliminan** (conservando la primera aparición) — ver "Principales decisiones" abajo.
+4. **Outliers**: se detectan y marcan con columnas booleanas (`outlier_<columna>`), pero **no se capan**.
+5. **Chequeos de consistencia**: invariantes duras (sin negativos, conteo=0 ⇒ duración=0) y hallazgos informativos (conteo>0 con duración≈0, rangos `[0,1]`).
+6. **Verificación de balance de clases** de `Revenue` (~85/15), sin corregirlo.
+7. **Etiquetas legibles** (`Weekend_label`, `Revenue_label`) pensadas para un dashboard de Power BI.
+8. **Persistencia**: guarda el resultado en `data/processed/online_shoppers_intention_procesado.csv`.
 
 **Principales decisiones:**
 
-- Los duplicados exactos (~1,6% de las filas) se marcan (`es_duplicado_exacto`) pero no se eliminan en el ETL: el dataset no tiene un identificador único de sesión/usuario, por lo que podrían ser sesiones reales distintas con el mismo comportamiento. Cada consumidor del dataset procesado decide qué hacer con ellos sobre su propia copia, sin tocar la fuente compartida:
-  - **Dashboard (Power BI)**: conviene conservarlos. Al no haber ID de sesión, eliminarlos subestimaría el tráfico/las conversiones reales que ve un analista de negocio.
-  - **Modelo (`feature_enginering.ipynb`)**: es razonable dropearlos antes de entrenar, usando la columna `es_duplicado_exacto`, para que filas idénticas no le den peso artificial extra a un mismo patrón durante el ajuste.
+- Los duplicados exactos (~1,6% de las filas, 125 sobre 12.330) se marcan (`es_duplicado_exacto`) y luego se eliminan (conservando la primera aparición): modelo y dashboard deben partir del mismo dataset para que las métricas de tráfico/conversión sean coherentes entre sí, en vez de que cada consumidor vea un conteo de filas distinto.
 - Los outliers (regla IQR) se marcan pero no se capan ni se recortan: el EDA ya concluyó que probablemente reflejan comportamiento real de navegación; capar depende del modelo que se use, así que esa decisión se deja para `feature_enginering.ipynb`.
 - El dataset procesado se guarda en **CSV** (no Parquet, ya que el proyecto no tiene `pyarrow` como dependencia) y es la fuente pensada para conectar directamente a un **dashboard de Power BI**.
 - El split train/test y el encoding/escalado de variables se hacen en `feature_enginering.ipynb`, no acá, para evitar fuga de datos al ajustar encoders/scalers con información del conjunto de test.
@@ -165,19 +165,21 @@ Pasos del notebook:
 
 ### `notebooks/feature_enginering.ipynb` — Feature Engineering
 
-Validación de la limpieza de datos y creación del `ColumnTransformer` modular (One-Hot Encoding + `StandardScaler`) para la automatización del preprocesamiento previo al modelado.
+Parte del dataset limpio de `ETL.ipynb` y lo deja listo para entrenar, usando `src/features.py`:
+
+- Descarta las columnas `outlier_*` (no capa los valores: el EDA/ETL ya concluyó que reflejan comportamiento real) y las etiquetas pensadas para el dashboard.
+- Agrega cinco features derivadas: `duracion_total`, `paginas_totales`, `duracion_promedio_pagina`, `proporcion_paginas_producto` y `es_visitante_recurrente`.
+- Separa train/test de forma estratificada por `Revenue` (dataset desbalanceado ~85/15), antes de ajustar cualquier transformación.
+- Codifica (`OneHotEncoder`) y escala (`StandardScaler`) mediante un `ColumnTransformer` ajustado solo con train.
+- Persiste `X_train`, `X_test`, `y_train`, `y_test` y el preprocesador ajustado en `data/models/` (`train_test_split.joblib`, `preprocessor.joblib`).
 
 ### `notebooks/modeling_mvp.ipynb` — Modelado y MVP
 
-Entrenamiento de modelos de clasificación en iteraciones:
+Carga los artefactos que deja `feature_enginering.ipynb` desde `data/models/`, entrena y compara modelos usando `src/metrics.py` y `src/recommender.py`:
 
-- **Manejo del Desbalance:** Integración de SMOTE y balanceo por pesos (`class_weight='balanced'`).
-- **Comparativa:** Evaluación del Modelo Baseline (Regresión Logística) frente a modelos ensemble avanzados (Random Forest / XGBoost).
-- **Lógica del Recomendador:** Transformación de la probabilidad estimada por el modelo en acciones de recomendación automática.
+- **Baseline:** Regresión Logística sin balancear — buena precision, recall bajo en la clase positiva (evidencia del desbalance).
+- **Manejo del Desbalance:** `class_weight="balanced"` y SMOTE (`imbalanced-learn`, aplicado solo sobre train), comparados contra el baseline.
+- **Comparativa:** Random Forest y XGBoost (`scale_pos_weight`) frente a las variantes de Regresión Logística, evaluados por precision, recall, F1, ROC-AUC y PR-AUC.
+- **Selección y persistencia:** el mejor modelo por ROC-AUC/PR-AUC se guarda en `data/models/modelo_final.joblib`.
+- **Lógica del Recomendador:** `asignar_accion` traduce la probabilidad de compra en `cross_selling` (>70%), `retencion` (<30%) o `sin_accion`, auditado contra la compra real con `resumen_acciones`.
 
----
-
-## 📝 Registro de Decisiones Técnicas
-
-Las justificaciones de arquitectura, tratamiento de duplicados, codificación y escalado se encuentran documentadas en detalle en el archivo:
-👉 `docs/DECISIONES_TECNICAS.md`

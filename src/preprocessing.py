@@ -1,11 +1,15 @@
 """
 Limpieza y validación del dataset de intención de compra.
 
-Expone las funciones que arma el pipeline de ETL: validación de esquema,
-corrección de tipos, detección (no eliminación) de duplicados y outliers,
-chequeos de consistencia, y persistencia del dataset limpio en
-``data/processed/``. `limpiar_dataset` orquesta todo el pipeline en un
-solo llamado.
+Expone las funciones que arman el pipeline de ETL: validación de esquema,
+corrección de tipos, eliminación de duplicados exactos, detección (no
+eliminación) de outliers, chequeos de consistencia, y persistencia del
+dataset limpio en ``data/processed/``. `limpiar_dataset` orquesta todo el
+pipeline en un solo llamado.
+
+Los duplicados se eliminan (no solo se marcan) para que el dataset
+persistido sea único y coherente tanto para el modelo como para el
+dashboard de Power BI.
 
 No se realiza imputación (el dataset no tiene valores faltantes), ni
 encoding/escalado para modelado, ni generación de datos sintéticos: esas
@@ -96,12 +100,10 @@ def corregir_tipos(df: pd.DataFrame) -> pd.DataFrame:
 
 def detectar_duplicados(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Marca las filas que son duplicados exactos, sin eliminarlas.
+    Marca las filas que son duplicados exactos, sin eliminarlas todavía.
 
-    No existe un identificador único de sesión/usuario en el dataset, por
-    lo que dos filas idénticas podrían ser sesiones distintas con el mismo
-    comportamiento. La decisión de qué hacer con ellas se deja para
-    etapas posteriores.
+    Se usa antes de `eliminar_duplicados` para poder reportar (ver
+    `resumen_duplicados`) cuántas filas había antes de quitarlas.
 
     Args:
         df: DataFrame de entrada.
@@ -112,6 +114,21 @@ def detectar_duplicados(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
     df["es_duplicado_exacto"] = df.duplicated(keep=False)
     return df
+
+
+def eliminar_duplicados(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Elimina duplicados exactos, conservando la primera aparición de cada fila.
+
+    Args:
+        df: DataFrame de entrada. Si tiene la columna `es_duplicado_exacto`
+            (ver `detectar_duplicados`), se descarta del resultado.
+
+    Returns:
+        Copia de `df` sin filas duplicadas, con el índice reiniciado.
+    """
+    columnas = [c for c in df.columns if c != "es_duplicado_exacto"]
+    return df[columnas].drop_duplicates(keep="first").reset_index(drop=True)
 
 
 def resumen_duplicados(df: pd.DataFrame) -> dict:
@@ -291,13 +308,14 @@ def limpiar_dataset(df: pd.DataFrame) -> pd.DataFrame:
         df: DataFrame crudo (ver `src.data_loader.cargar_datos`).
 
     Returns:
-        DataFrame limpio, tipado, con duplicados y outliers marcados
-        (no eliminados) y etiquetas legibles agregadas.
+        DataFrame limpio, tipado, sin duplicados exactos, con outliers
+        marcados (no eliminados) y etiquetas legibles agregadas.
     """
     df = df.copy()
     validar_esquema(df)
     df = corregir_tipos(df)
     df = detectar_duplicados(df)
+    df = eliminar_duplicados(df)
     df = detectar_outliers_iqr(df)
     df = agregar_etiquetas_legibles(df)
     return df
@@ -354,13 +372,19 @@ if __name__ == "__main__":
     datos_crudos = cargar_datos()
     print(f"Dataset crudo: {datos_crudos.shape[0]} filas x {datos_crudos.shape[1]} columnas")
 
-    datos_limpios = limpiar_dataset(datos_crudos)
-    print(
-        f"Dataset limpio: {datos_limpios.shape[0]} filas x {datos_limpios.shape[1]} columnas"
-    )
+    validar_esquema(datos_crudos)
+    datos_tipados = corregir_tipos(datos_crudos)
+    datos_marcados = detectar_duplicados(datos_tipados)
 
-    print("\nResumen de duplicados:")
-    print(resumen_duplicados(datos_limpios))
+    print("\nResumen de duplicados (antes de eliminarlos):")
+    print(resumen_duplicados(datos_marcados))
+
+    datos_limpios = eliminar_duplicados(datos_marcados)
+    datos_limpios = detectar_outliers_iqr(datos_limpios)
+    datos_limpios = agregar_etiquetas_legibles(datos_limpios)
+    print(
+        f"\nDataset limpio: {datos_limpios.shape[0]} filas x {datos_limpios.shape[1]} columnas"
+    )
 
     print("\nResumen de outliers:")
     print(resumen_outliers(datos_limpios).to_string(index=False))
