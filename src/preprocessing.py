@@ -1,104 +1,372 @@
-import numpy as np
+"""
+Limpieza y validación del dataset de intención de compra.
+
+Expone las funciones que arma el pipeline de ETL: validación de esquema,
+corrección de tipos, detección (no eliminación) de duplicados y outliers,
+chequeos de consistencia, y persistencia del dataset limpio en
+``data/processed/``. `limpiar_dataset` orquesta todo el pipeline en un
+solo llamado.
+
+No se realiza imputación (el dataset no tiene valores faltantes), ni
+encoding/escalado para modelado, ni generación de datos sintéticos: esas
+decisiones quedan para la etapa de feature engineering / modelado.
+"""
+
+from pathlib import Path
+
 import pandas as pd
-from sklearn.preprocessing import StandardScaler, OneHotEncoder
-from sklearn.compose import ColumnTransformer
-from sklearn.pipeline import Pipeline
 
-def procesar_etl(df: pd.DataFrame, eliminar_duplicados: bool = True) -> pd.DataFrame:
+RUTA_PROYECTO = Path(__file__).resolve().parent.parent
+RUTA_PROCESSED_POR_DEFECTO = (
+    RUTA_PROYECTO / "data" / "processed" / "online_shoppers_intention_procesado.csv"
+)
+
+COLUMNAS_ESPERADAS = [
+    "Administrative", "Administrative_Duration",
+    "Informational", "Informational_Duration",
+    "ProductRelated", "ProductRelated_Duration",
+    "BounceRates", "ExitRates", "PageValues", "SpecialDay",
+    "Month", "OperatingSystems", "Browser", "Region", "TrafficType",
+    "VisitorType", "Weekend", "Revenue",
+]
+COLUMNAS_BOOLEANAS = ["Weekend", "Revenue"]
+COLUMNAS_CATEGORICAS = [
+    "Month", "VisitorType", "OperatingSystems", "Browser", "Region", "TrafficType",
+]
+COLUMNAS_NUMERICAS = [
+    "Administrative", "Administrative_Duration",
+    "Informational", "Informational_Duration",
+    "ProductRelated", "ProductRelated_Duration",
+    "BounceRates", "ExitRates", "PageValues", "SpecialDay",
+]
+PARES_CONTEO_DURACION = [
+    ("Administrative", "Administrative_Duration"),
+    ("Informational", "Informational_Duration"),
+    ("ProductRelated", "ProductRelated_Duration"),
+]
+
+
+def validar_esquema(df: pd.DataFrame) -> None:
     """
-    Realiza la limpieza inicial de datos: tratamiento de nulos y duplicados.
-    
+    Valida que el DataFrame tenga exactamente las columnas esperadas y
+    ningún valor faltante.
+
     Args:
-        df (pd.DataFrame): Dataframe original.
-        eliminar_duplicados (bool): Si es True, elimina filas duplicadas exactas.
-        
+        df: DataFrame a validar.
+
+    Raises:
+        ValueError: Si faltan columnas, sobran columnas, o hay nulos.
+    """
+    columnas_actuales = set(df.columns)
+    columnas_esperadas = set(COLUMNAS_ESPERADAS)
+
+    faltantes = columnas_esperadas - columnas_actuales
+    sobrantes = columnas_actuales - columnas_esperadas
+    if faltantes or sobrantes:
+        raise ValueError(
+            f"Esquema inesperado. Faltan columnas: {sorted(faltantes)}. "
+            f"Columnas no esperadas: {sorted(sobrantes)}."
+        )
+
+    nulos_por_columna = df.isna().sum()
+    total_nulos = int(nulos_por_columna.sum())
+    if total_nulos > 0:
+        columnas_con_nulos = nulos_por_columna[nulos_por_columna > 0].to_dict()
+        raise ValueError(f"Se encontraron valores nulos: {columnas_con_nulos}")
+
+
+def corregir_tipos(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Corrige los tipos de dato de las columnas booleanas y categóricas.
+
+    Args:
+        df: DataFrame de entrada (no se modifica in-place).
+
     Returns:
-        pd.DataFrame: Dataframe limpio.
+        Copia de `df` con `Weekend`/`Revenue` como `bool` y las columnas
+        categóricas como dtype `category`.
     """
-    df_clean = df.copy()
-    
-    # 1. Tratamiento de duplicados
-    if eliminar_duplicados:
-        filas_antes = len(df_clean)
-        df_clean = df_clean.drop_duplicates()
-        filas_despues = len(df_clean)
-        print(f"[ETL] Registros duplicados eliminados: {filas_antes - filas_despues}")
-    
-    # 2. Verificación e Imputación de Nulos (por seguridad)
-    if df_clean.isnull().sum().sum() > 0:
-        # Para numéricas se imputa mediana, para categóricas la moda
-        num_cols = df_clean.select_dtypes(include=[np.number]).columns
-        cat_cols = df_clean.select_dtypes(exclude=[np.number]).columns
-        
-        for col in num_cols:
-            df_clean[col] = df_clean[col].fillna(df_clean[col].median())
-        for col in cat_cols:
-            df_clean[col] = df_clean[col].fillna(df_clean[col].mode()[0])
-        print("[ETL] Se completó la imputación de valores faltantes.")
-    else:
-        print("[ETL] Sin valores nulos detectados.")
-        
-    # 3. Normalización del Target (Revenue) a binario entero (1 / 0)
-    if 'Revenue' in df_clean.columns and df_clean['Revenue'].dtype == bool:
-        df_clean['Revenue'] = df_clean['Revenue'].astype(int)
-        
-    return df_clean
+    df = df.copy()
+    for columna in COLUMNAS_BOOLEANAS:
+        df[columna] = df[columna].astype(bool)
+    for columna in COLUMNAS_CATEGORICAS:
+        df[columna] = df[columna].astype("category")
+    return df
 
 
-def obtener_pipeline_preprocesamiento():
-    numerical_columns = [
-        "Administrative", "Administrative_Duration", 
-        "Informational", "Informational_Duration", 
-        "ProductRelated", "ProductRelated_Duration", 
-        "BounceRates", "ExitRates", "PageValues"
-    ]
-    
-    categorical_columns = [
-        "Month", "OperatingSystems", "Browser", 
-        "Region", "TrafficType", "VisitorType", "Weekend", "SpecialDay"
-    ]
-    
-    num_pipeline = Pipeline(steps=[
-        ('scaler', StandardScaler())
-    ])
-    
-    # Compatibilidad para versiones viejas y nuevas de Scikit-Learn
-    try:
-        ohe = OneHotEncoder(handle_unknown='ignore', sparse_output=False)
-    except TypeError:
-        ohe = OneHotEncoder(handle_unknown='ignore', sparse=False)
-
-    cat_pipeline = Pipeline(steps=[
-        ('onehot', ohe)
-    ])
-    
-    preprocessor = ColumnTransformer(transformers=[
-        ('num', num_pipeline, numerical_columns),
-        ('cat', cat_pipeline, categorical_columns)
-    ])
-    
-    return preprocessor, numerical_columns, categorical_columns
-
-
-def preparar_datos_modelo(df: pd.DataFrame, target_col: str = 'Revenue'):
+def detectar_duplicados(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Aplica el ETL y el Pipeline de transformación devolviendo matriz X e y.
-    
+    Marca las filas que son duplicados exactos, sin eliminarlas.
+
+    No existe un identificador único de sesión/usuario en el dataset, por
+    lo que dos filas idénticas podrían ser sesiones distintas con el mismo
+    comportamiento. La decisión de qué hacer con ellas se deja para
+    etapas posteriores.
+
+    Args:
+        df: DataFrame de entrada.
+
     Returns:
-        X_processed (np.ndarray / pd.DataFrame), y (pd.Series)
+        Copia de `df` con una columna booleana adicional `es_duplicado_exacto`.
     """
-    # Ejecutar ETL
-    df_clean = procesar_etl(df)
-    
-    # Separar X e y
-    X = df_clean.drop(columns=[target_col])
-    y = df_clean[target_col]
-    
-    # Obtener preprocesador
-    preprocessor, num_cols, cat_cols = obtener_pipeline_preprocesamiento()
-    
-    # Transformar características
-    X_processed = preprocessor.fit_transform(X)
-    
-    print(f"[PREPROCESSING] Matriz procesada lista. Forma: {X_processed.shape}")
-    return X_processed, y, preprocessor
+    df = df.copy()
+    df["es_duplicado_exacto"] = df.duplicated(keep=False)
+    return df
+
+
+def resumen_duplicados(df: pd.DataFrame) -> dict:
+    """
+    Resume la cantidad y proporción de duplicados exactos.
+
+    Args:
+        df: DataFrame con la columna `es_duplicado_exacto` (ver `detectar_duplicados`).
+
+    Returns:
+        Diccionario con `n_filas`, `n_duplicados_exactos` y `pct_duplicados`.
+    """
+    n_filas = len(df)
+    n_duplicados = int(df["es_duplicado_exacto"].sum())
+    return {
+        "n_filas": n_filas,
+        "n_duplicados_exactos": n_duplicados,
+        "pct_duplicados": round(100 * n_duplicados / n_filas, 2) if n_filas else 0.0,
+    }
+
+
+def detectar_outliers_iqr(
+    df: pd.DataFrame, columnas: list[str] | None = None, factor: float = 1.5
+) -> pd.DataFrame:
+    """
+    Marca outliers univariados en columnas numéricas usando el rango
+    intercuartílico (IQR), sin modificar los valores originales.
+
+    Args:
+        df: DataFrame de entrada.
+        columnas: Columnas numéricas a evaluar. Por defecto, `COLUMNAS_NUMERICAS`.
+        factor: Multiplicador del IQR para definir las cercas (1.5 = regla estándar).
+
+    Returns:
+        Copia de `df` con una columna booleana `outlier_<columna>` por cada
+        columna evaluada.
+    """
+    columnas = columnas if columnas is not None else COLUMNAS_NUMERICAS
+    df = df.copy()
+    for columna in columnas:
+        q1 = df[columna].quantile(0.25)
+        q3 = df[columna].quantile(0.75)
+        iqr = q3 - q1
+        limite_inferior = q1 - factor * iqr
+        limite_superior = q3 + factor * iqr
+        df[f"outlier_{columna}"] = (df[columna] < limite_inferior) | (
+            df[columna] > limite_superior
+        )
+    return df
+
+
+def resumen_outliers(
+    df_con_flags: pd.DataFrame, columnas: list[str] | None = None
+) -> pd.DataFrame:
+    """
+    Resume la cantidad y proporción de outliers detectados por columna.
+
+    Args:
+        df_con_flags: DataFrame con columnas `outlier_<columna>` (ver `detectar_outliers_iqr`).
+        columnas: Columnas numéricas a resumir. Por defecto, `COLUMNAS_NUMERICAS`.
+
+    Returns:
+        DataFrame con una fila por columna: `columna`, `n_outliers`, `pct_outliers`.
+    """
+    columnas = columnas if columnas is not None else COLUMNAS_NUMERICAS
+    n_filas = len(df_con_flags)
+    filas = []
+    for columna in columnas:
+        n_outliers = int(df_con_flags[f"outlier_{columna}"].sum())
+        filas.append(
+            {
+                "columna": columna,
+                "n_outliers": n_outliers,
+                "pct_outliers": round(100 * n_outliers / n_filas, 2) if n_filas else 0.0,
+            }
+        )
+    return pd.DataFrame(filas)
+
+
+def validar_consistencia(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Ejecuta chequeos de consistencia lógica sobre el dataset.
+
+    Chequeos duros (levantan `ValueError` si se violan, porque indicarían
+    corrupción de datos real): conteo=0 con duración>0 en los pares
+    conteo/duración, y valores negativos en columnas numéricas.
+
+    Chequeos informativos (se reportan, no son errores): conteo>0 con
+    duración≈0 (plausible en visitas muy breves), `BounceRates`/`ExitRates`/
+    `SpecialDay` fuera de `[0, 1]`.
+
+    Args:
+        df: DataFrame ya tipado (ver `corregir_tipos`).
+
+    Returns:
+        DataFrame resumen con columnas `chequeo`, `n_violaciones`, `severidad`.
+
+    Raises:
+        ValueError: Si se viola algún chequeo duro.
+    """
+    resultados = []
+
+    for columna in COLUMNAS_NUMERICAS:
+        n_negativos = int((df[columna] < 0).sum())
+        if n_negativos > 0:
+            raise ValueError(
+                f"Se encontraron {n_negativos} valores negativos en '{columna}'."
+            )
+        resultados.append(
+            {"chequeo": f"sin_negativos_{columna}", "n_violaciones": 0, "severidad": "dura"}
+        )
+
+    for conteo, duracion in PARES_CONTEO_DURACION:
+        conteo_cero_duracion_positiva = int(((df[conteo] == 0) & (df[duracion] > 0)).sum())
+        if conteo_cero_duracion_positiva > 0:
+            raise ValueError(
+                f"Se encontraron {conteo_cero_duracion_positiva} filas con "
+                f"{conteo}=0 pero {duracion}>0."
+            )
+        resultados.append(
+            {
+                "chequeo": f"{conteo}_cero_implica_{duracion}_cero",
+                "n_violaciones": 0,
+                "severidad": "dura",
+            }
+        )
+
+        conteo_positivo_duracion_cero = int(((df[conteo] > 0) & (df[duracion] == 0)).sum())
+        resultados.append(
+            {
+                "chequeo": f"{conteo}_positivo_con_{duracion}_cero",
+                "n_violaciones": conteo_positivo_duracion_cero,
+                "severidad": "informativa",
+            }
+        )
+
+    for columna in ["BounceRates", "ExitRates", "SpecialDay"]:
+        fuera_de_rango = int(((df[columna] < 0) | (df[columna] > 1)).sum())
+        resultados.append(
+            {
+                "chequeo": f"{columna}_fuera_de_[0,1]",
+                "n_violaciones": fuera_de_rango,
+                "severidad": "informativa",
+            }
+        )
+
+    return pd.DataFrame(resultados)
+
+
+def agregar_etiquetas_legibles(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Agrega columnas con etiquetas legibles para consumo en dashboards
+    (ej. Power BI), sin modificar ni reemplazar las columnas originales.
+
+    `OperatingSystems`, `Browser`, `Region` y `TrafficType` quedan como
+    códigos categóricos: el dataset original (UCI) no incluye el
+    diccionario de valores para traducirlos.
+
+    Args:
+        df: DataFrame ya tipado (ver `corregir_tipos`).
+
+    Returns:
+        Copia de `df` con `Weekend_label` ("Sí"/"No") y `Revenue_label`
+        ("Compra"/"No compra").
+    """
+    df = df.copy()
+    df["Weekend_label"] = df["Weekend"].map({True: "Sí", False: "No"})
+    df["Revenue_label"] = df["Revenue"].map({True: "Compra", False: "No compra"})
+    return df
+
+
+def limpiar_dataset(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Orquesta el pipeline completo de limpieza sobre el dataset crudo.
+
+    Args:
+        df: DataFrame crudo (ver `src.data_loader.cargar_datos`).
+
+    Returns:
+        DataFrame limpio, tipado, con duplicados y outliers marcados
+        (no eliminados) y etiquetas legibles agregadas.
+    """
+    df = df.copy()
+    validar_esquema(df)
+    df = corregir_tipos(df)
+    df = detectar_duplicados(df)
+    df = detectar_outliers_iqr(df)
+    df = agregar_etiquetas_legibles(df)
+    return df
+
+
+def guardar_datos_procesados(
+    df: pd.DataFrame, ruta_salida: Path | str = RUTA_PROCESSED_POR_DEFECTO
+) -> Path:
+    """
+    Persiste el dataset limpio como CSV.
+
+    Args:
+        df: DataFrame a guardar.
+        ruta_salida: Ruta de destino. Por defecto, `data/processed/online_shoppers_intention_procesado.csv`.
+
+    Returns:
+        Ruta resuelta del archivo escrito.
+    """
+    ruta_salida = Path(ruta_salida)
+    ruta_salida.parent.mkdir(parents=True, exist_ok=True)
+    df.to_csv(ruta_salida, index=False)
+    return ruta_salida.resolve()
+
+
+def cargar_datos_procesados(
+    ruta_csv: Path | str = RUTA_PROCESSED_POR_DEFECTO,
+) -> pd.DataFrame:
+    """
+    Recarga el dataset procesado desde CSV, reaplicando la corrección de
+    tipos (el CSV no preserva los dtypes `category`/`bool`).
+
+    Args:
+        ruta_csv: Ruta al CSV procesado. Por defecto, la ruta de salida
+            estándar del ETL.
+
+    Returns:
+        DataFrame con los mismos dtypes que produce `limpiar_dataset`.
+
+    Raises:
+        FileNotFoundError: Si no existe ningún archivo en `ruta_csv`.
+    """
+    ruta_csv = Path(ruta_csv)
+    if not ruta_csv.is_file():
+        raise FileNotFoundError(
+            f"No se encontró el archivo de datos procesados en: {ruta_csv}"
+        )
+    df = pd.read_csv(ruta_csv)
+    return corregir_tipos(df)
+
+
+if __name__ == "__main__":
+    from src.data_loader import cargar_datos
+
+    datos_crudos = cargar_datos()
+    print(f"Dataset crudo: {datos_crudos.shape[0]} filas x {datos_crudos.shape[1]} columnas")
+
+    datos_limpios = limpiar_dataset(datos_crudos)
+    print(
+        f"Dataset limpio: {datos_limpios.shape[0]} filas x {datos_limpios.shape[1]} columnas"
+    )
+
+    print("\nResumen de duplicados:")
+    print(resumen_duplicados(datos_limpios))
+
+    print("\nResumen de outliers:")
+    print(resumen_outliers(datos_limpios).to_string(index=False))
+
+    print("\nChequeos de consistencia:")
+    print(validar_consistencia(datos_limpios).to_string(index=False))
+
+    ruta_final = guardar_datos_procesados(datos_limpios)
+    print(f"\nDataset procesado guardado en: {ruta_final}")
