@@ -43,6 +43,10 @@ COLUMNAS_NUMERICAS = [
     "ProductRelated", "ProductRelated_Duration",
     "BounceRates", "ExitRates", "PageValues", "SpecialDay",
 ]
+# SpecialDay se trata como numérica continua (acotada en [0, 1]) para la detección
+# de outliers y el escalado del pipeline. En EDA.ipynb se visualiza junto a las
+# categóricas por tener pocos valores discretos (0, 0.2, 0.4, 0.6, 0.8, 1.0) — es
+# una elección de representación distinta según el propósito, no una inconsistencia.
 PARES_CONTEO_DURACION = [
     ("Administrative", "Administrative_Duration"),
     ("Informational", "Informational_Duration"),
