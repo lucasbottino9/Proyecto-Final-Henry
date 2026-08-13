@@ -39,16 +39,19 @@ def evaluar_modelo(y_true: pd.Series, y_pred: np.ndarray, y_prob: np.ndarray) ->
     }
 
 
-def comparar_modelos(resultados: dict[str, dict]) -> pd.DataFrame:
+def comparar_modelos(resultados: dict[str, dict], criterio: str = "roc_auc") -> pd.DataFrame:
     """
     Arma una tabla comparativa a partir de varios resultados de `evaluar_modelo`.
 
     Args:
         resultados: Diccionario `{nombre_modelo: metricas}`, donde `metricas`
             es la salida de `evaluar_modelo`.
+        criterio: Columna por la que ordenar (ej. `"roc_auc"` o
+            `"average_precision"`). `average_precision` (PR-AUC) es preferible
+            cuando la clase positiva es minoritaria, como en este dataset.
 
     Returns:
-        DataFrame con una fila por modelo, ordenado por `roc_auc` descendente.
+        DataFrame con una fila por modelo, ordenado por `criterio` descendente.
     """
     tabla = pd.DataFrame(resultados).T
-    return tabla.sort_values("roc_auc", ascending=False)
+    return tabla.sort_values(criterio, ascending=False)

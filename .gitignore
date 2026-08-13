@@ -12,6 +12,9 @@ __pycache__/
 # Temporal de Jupyter Notebooks
 .ipynb_checkpoints/
 
+# Archivos temporales que genera CatBoost al entrenar
+catboost_info/
+
 # Archivos del sistema y configuración local
 .DS_Store
 Thumbs.db
