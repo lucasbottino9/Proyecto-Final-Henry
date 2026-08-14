@@ -43,13 +43,14 @@ Proyecto-Final-Henry/
 │   ├── csv/          # Datasets en formato CSV (online_shoppers_intention.csv)
 │   ├── raw/          # Datos crudos sin procesar
 │   ├── processed/    # Datos limpios y matrices procesadas para modelado
-│   └── models/       # Artefactos y binarios de modelos (.pkl / .joblib)
+│   └── models/       # Artefactos y binarios de modelos (.pkl / .joblib) + mejores_hiperparametros.json
 ├── docs/             # Registro formal de decisiones técnicas (ADR)
 ├── notebooks/        # Cuadernos Jupyter del ciclo de vida analítico
 │   ├── EDA.ipynb                 # Análisis Exploratorio de Datos (EDA)
 │   ├── ETL.ipynb                 # Limpieza, validación y persistencia del dataset
 │   ├── feature_enginering.ipynb  # Feature engineering y preparación para modelado
-│   └── modeling_mvp.ipynb        # Baseline, desbalance, ensembles y recomendador
+│   ├── modeling_mvp.ipynb        # Baseline, desbalance, ensembles y recomendador (Sprint 1)
+│   └── modeling_avanzado.ipynb   # LightGBM/CatBoost, tuning Optuna, SMOTE vs. class_weight, calibración (Sprint 2)
 ├── src/              # Código fuente modular y reutilizable
 │   ├── data_loader.py               # Módulo de ingesta de datos
 │   ├── preprocessing.py             # Pipeline de ETL (limpieza, validación)
@@ -214,4 +215,52 @@ Carga `train_test_split.joblib`/`preprocessor.joblib` desde `data/models/`, entr
 
    `cross_selling` concentra la mayor tasa real de compra y `retencion` la menor — coherencia de negocio confirmada antes de dar el modelo por válido.
 6. **Limitación conocida** (documentada en las conclusiones del propio notebook): el modelo se elige por ROC-AUC/PR-AUC (métricas agregadas sobre todos los umbrales posibles), no por el desempeño específico en los umbrales de negocio 0,7/0,3 que usa el recomendador. Es exactamente el gap que cierra Precision@K/Recall@K, planificado para Sprint 2.
+
+> **Nota:** `data/models/modelo_final.joblib` refleja el modelo vigente en cada momento, no necesariamente el Random Forest descripto arriba. `modeling_avanzado.ipynb` (Sprint 2, ver abajo) lo reemplazó tras encontrar un modelo con mejor PR-AUC y mejor calibración de probabilidades.
+
+### `notebooks/modeling_avanzado.ipynb` — Modelado Avanzado y Tuning de Hiperparámetros (Sprint 2)
+
+Extiende la comparativa de `modeling_mvp.ipynb` sumando LightGBM y CatBoost, tuning de hiperparámetros con Optuna, y evalúa dos técnicas adicionales sobre el modelo ganador: re-muestreo (SMOTE vs. `class_weight`) y calibración de probabilidades (`CalibratedClassifierCV`). Reutiliza los mismos artefactos (`train_test_split.joblib`, `preprocessor.joblib`) y las mismas funciones de `src/metrics.py`/`src/recommender.py`. `modeling_mvp.ipynb` es un entregable de Sprint 1 ya aprobado y no se modifica.
+
+Todo el proceso decide por **PR-AUC** (`average_precision`), no F1: el motor de recomendación actúa sobre dos umbrales absolutos de probabilidad (0,7/0,3), no sobre la frontera 0,5 que asumiría F1.
+
+1. **Referencia Sprint 1**: reentrena Random Forest y XGBoost con la misma configuración de `modeling_mvp.ipynb`, para tener el punto de comparación en la misma tabla.
+2. **Modelos ensemble adicionales (baseline, sin tuning)**: LightGBM (`class_weight="balanced"`) y CatBoost (`auto_class_weights="Balanced"`) — mismo manejo de desbalance que el resto del proyecto, adaptado a cada librería.
+3. **Tuning con Optuna**: un `study` por modelo (XGBoost, LightGBM, CatBoost), maximizando PR-AUC promedio en Stratified 3-Fold CV sobre train (hasta 30 trials o 4 minutos por modelo). Optuna busca solo hiperparámetros de complejidad/regularización (`n_estimators`, profundidad, `learning_rate`, regularización L1/L2, subsampling); el manejo del desbalance queda fijo.
+4. **Re-muestreo — SMOTE vs. `class_weight`**: Sprint 1 solo había comparado esto para Regresión Logística; acá se extiende al modelo ensemble ganador del tuning, con los mismos hiperparámetros de complejidad y cambiando solo la estrategia de balanceo.
+5. **Calibración de probabilidades** (`CalibratedClassifierCV`): evalúa si Platt scaling (`sigmoid`) o regresión isotónica corrigen el desajuste entre probabilidad predicha y tasa real de compra — relevante porque el recomendador decide con umbrales absolutos, no con un ranking. Se mide con Brier score y curva de calibración (`calibration_curve`), además de PR-AUC.
+6. **Comparativa final** entre los 10 candidatos evaluados (2 de referencia + 2 baseline + 3 tuneados + 1 remuestreo + 2 calibrados) y selección del ganador por PR-AUC.
+7. **Verificación de negocio** y **persistencia** del ganador en `data/models/modelo_final.joblib`, solo si supera al Random Forest de Sprint 1.
+
+**Comparativa completa (test set, 2.441 sesiones), ordenada por PR-AUC:**
+
+| Modelo | Precision | Recall | F1 | ROC-AUC | PR-AUC | Brier |
+|---|---|---|---|---|---|---|
+| **LightGBM tuneado + calibración sigmoid** | 0,718 | 0,665 | 0,690 | 0,938 | **0,756** | **0,068** |
+| LightGBM tuneado + calibración isotónica | 0,730 | 0,657 | 0,691 | 0,938 | 0,754 | 0,068 |
+| LightGBM tuneado (Optuna, sin calibrar) | 0,534 | 0,848 | 0,655 | 0,937 | 0,752 | 0,101 |
+| CatBoost tuneado (Optuna) | 0,561 | 0,830 | 0,669 | 0,935 | 0,752 | — |
+| XGBoost tuneado (Optuna) | 0,554 | 0,856 | 0,673 | 0,937 | 0,752 | — |
+| LightGBM baseline (sin tuning) | 0,572 | 0,798 | 0,667 | 0,932 | 0,747 | — |
+| LightGBM + SMOTE (mismos hiperparámetros, sin `class_weight`) | 0,637 | 0,754 | 0,691 | 0,937 | 0,747 | — |
+| CatBoost baseline (sin tuning) | 0,573 | 0,788 | 0,664 | 0,932 | 0,738 | — |
+| Random Forest (Sprint 1) | 0,658 | 0,709 | 0,683 | 0,924 | 0,723 | — |
+| XGBoost baseline (Sprint 1) | 0,646 | 0,678 | 0,662 | 0,922 | 0,717 | — |
+
+**Hallazgos clave:**
+
+- **Tuning**: los tres modelos tuneados con Optuna quedan casi empatados por PR-AUC (0,7515–0,7517) y todos superan a sus versiones sin tuning y al Random Forest de Sprint 1.
+- **Re-muestreo**: `class_weight` le gana a SMOTE para el modelo ensemble ganador (PR-AUC 0,752 vs. 0,747) — coherente con lo que ya había mostrado Sprint 1 para Regresión Logística (ambas técnicas parejas, sin una ventaja clara de SMOTE).
+- **Calibración — el hallazgo más relevante de este notebook**: el modelo tuneado sin calibrar estaba mal calibrado (Brier score 0,101); Platt scaling lo baja a 0,068 (**−33%**) y de paso mejora el PR-AUC (0,752 → 0,756). Esto importa especialmente acá porque `asignar_accion` decide con umbrales *absolutos* de probabilidad (0,7/0,3), no con un ranking — un modelo mal calibrado hace que "probabilidad > 70%" no signifique realmente "70% de esas sesiones compran".
+- **Ganador definitivo**: LightGBM tuneado + calibración sigmoid (`CalibratedClassifierCV`, `method="sigmoid"`, `cv=3`), persistido en `data/models/modelo_final.joblib`. Sus hiperparámetros base quedan documentados en `data/models/mejores_hiperparametros.json`.
+
+**Motor de recomendación, con el modelo calibrado (comparar contra la tabla de Random Forest en `modeling_mvp.ipynb` arriba):**
+
+| Acción | Sesiones | % del total | Tasa real de compra |
+|---|---|---|---|
+| `retencion` (prob. < 30%) | 1.987 | 81,40% | 4,88% |
+| `sin_accion` | 256 | 10,49% | 44,92% |
+| `cross_selling` (prob. > 70%) | 198 | 8,11% | **85,86%** |
+
+La calibración corrige exactamente el desajuste que motivó evaluarla: con el modelo sin calibrar, `cross_selling` (prob. > 70%) tenía solo ~65% de tasa real de compra, por debajo de su propio umbral. Calibrado, sube a 85,86% — a costa de ser más conservador (menos sesiones caen en `cross_selling`: 198 vs. 434 antes de calibrar), un trade-off razonable para un motor que dispara incentivos con costo real.
 
