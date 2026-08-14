@@ -1,21 +1,35 @@
-# Entornos virtuales
+# Entorno virtual y dependencias
 venv/
 .venv/
 env/
 ENV/
+build/
+dist/
+*.egg-info/
 
-# Caché de Python
+# Archivos compilados de Python
 __pycache__/
-*.pyc
-*.pyo
+*.py[cod]
+*$py.class
 
-# Temporal de Jupyter Notebooks
-.ipynb_checkpoints/
+
+# Variables de entorno y secretos (¡NUNCA SUBIR AL REPO!)
+.env
+.env.local
 
 # Archivos temporales que genera CatBoost al entrenar
 catboost_info/
 
 # Archivos del sistema y configuración local
+# IDEs y editores de código
+.vscode/
+.idea/
+*.swp
+*.swo
 .DS_Store
-Thumbs.db
-.env
+
+# Cobertura de pruebas y logs
+*.log
+.coverage
+htmlcov/
+.pytest_cache/
