@@ -57,6 +57,12 @@ Proyecto-Final-Henry/
 │   ├── features.py                  # Feature engineering, split, OHE y escalado
 │   ├── metrics.py                   # Evaluación de modelos (precision/recall/F1/AUC)
 │   └── recommender.py               # Motor de recomendación (cross-selling/retención)
+├── api/              # API FastAPI que sirve el modelo (Sprint 2)
+│   ├── main.py                      # App FastAPI, carga de artefactos al arrancar
+│   ├── routes.py                    # Ruteo: GET /health, POST /predict
+│   ├── schemas.py                   # Schemas Pydantic (SesionInput, PredictResponse)
+│   └── inference.py                 # Carga del modelo + lógica de predicción
+├── demo_app.py       # Demo interactiva en Streamlit (consume la API)
 ├── requirements.txt  # Dependencias del proyecto
 └── README.md         # Documentación principal del repositorio
 ```
@@ -87,6 +93,98 @@ source venv/bin/activate
 ```bash
 pip install -r requirements.txt
 ```
+
+## 🔌 API y Demo Interactiva
+
+Los artefactos del modelo ya entrenado (`data/models/modelo_final.joblib`, `preprocessor.joblib`) están incluidos en el repositorio — con el paso anterior (`pip install -r requirements.txt`) alcanza para levantar la API y la demo, **no hace falta correr ningún notebook primero**.
+
+### 1. Levantar la API
+
+```bash
+# Activar el entorno virtual si no está activo
+source venv/bin/activate    # Mac/Linux
+# .\venv\Scripts\activate   # Windows
+
+uvicorn api.main:app --reload
+```
+
+> ⚠️ **Si aparece `ModuleNotFoundError: No module named 'fastapi'`** aunque ya corriste `pip install -r requirements.txt`: `uvicorn`/`python` se está resolviendo a un intérprete distinto del entorno virtual (típico si usás `pyenv`/`mise`/`conda` y el venv no quedó activado en esa terminal). Solución: confirmar que el entorno esté activado (arriba), o invocar el binario del venv directo — `venv/bin/uvicorn api.main:app --reload` (Mac/Linux) o `venv\Scripts\uvicorn.exe api.main:app --reload` (Windows).
+
+La API queda en `http://localhost:8000`.
+
+### 2. Probar la API
+
+**Documentación interactiva (recomendado):** `http://localhost:8000/docs` — Swagger UI autogenerado por FastAPI, con un ejemplo precargado en `POST /predict` y la descripción de cada variable. Se puede editar los valores y ejecutar la petición ahí mismo, sin escribir código.
+
+**Por línea de comandos:**
+
+```bash
+curl -X POST http://localhost:8000/predict -H "Content-Type: application/json" -d '{
+  "Administrative": 2, "Administrative_Duration": 45.0,
+  "Informational": 0, "Informational_Duration": 0.0,
+  "ProductRelated": 25, "ProductRelated_Duration": 620.5,
+  "BounceRates": 0.01, "ExitRates": 0.02, "PageValues": 35.0, "SpecialDay": 0.0,
+  "Month": "Nov", "OperatingSystems": 2, "Browser": 2, "Region": 1, "TrafficType": 2,
+  "VisitorType": "Returning_Visitor", "Weekend": false
+}'
+```
+
+Respuesta esperada: `{"purchase_probability": 0.83, "recommended_action": "cross_selling"}`.
+
+**Variables de entrada (`POST /predict`)** — mismas 17 columnas crudas del dataset original, sin `Revenue` (que es lo que se predice; diccionario completo de cada variable en `notebooks/EDA.ipynb`):
+
+| Variable | Tipo | Descripción | Valores válidos |
+|---|---|---|---|
+| `Administrative` | int | Páginas administrativas visitadas | ≥ 0 |
+| `Administrative_Duration` | float | Tiempo en páginas administrativas (segundos) | ≥ 0 |
+| `Informational` | int | Páginas informativas visitadas | ≥ 0 |
+| `Informational_Duration` | float | Tiempo en páginas informativas (segundos) | ≥ 0 |
+| `ProductRelated` | int | Páginas de producto visitadas | ≥ 0 |
+| `ProductRelated_Duration` | float | Tiempo en páginas de producto (segundos) | ≥ 0 |
+| `BounceRates` | float | Tasa de rebote promedio de las páginas vistas | 0 – 1 |
+| `ExitRates` | float | Tasa de salida promedio de las páginas vistas | 0 – 1 |
+| `PageValues` | float | Valor promedio (económico) de las páginas vistas | ≥ 0 |
+| `SpecialDay` | float | Cercanía a una fecha comercial especial | 0 – 1 |
+| `Month` | string | Mes de la sesión | `Feb, Mar, May, June, Jul, Aug, Sep, Oct, Nov, Dec` (el dataset UCI no tiene sesiones de `Jan`/`Apr`) |
+| `OperatingSystems` | int | Código de sistema operativo (sin diccionario público) | `1`–`8` |
+| `Browser` | int | Código de navegador (sin diccionario público) | `1`–`13` |
+| `Region` | int | Código de región geográfica (sin diccionario público) | `1`–`9` |
+| `TrafficType` | int | Código de tipo de tráfico (sin diccionario público) | `1`–`11`, `13`–`20` (no existe el `12` en el dataset) |
+| `VisitorType` | string | Tipo de visitante | `New_Visitor, Returning_Visitor, Other` |
+| `Weekend` | bool | Si la sesión ocurrió en fin de semana | `true` / `false` |
+
+Un valor categórico fuera de los válidos (ej. `TrafficType: 12`) devuelve `422` con un mensaje explicando por qué — se rechaza en vez de dejarlo pasar en silencio, porque el `OneHotEncoder` lo degradaría a un vector de ceros sin avisar.
+
+**Respuesta (`PredictResponse`):**
+
+| Campo | Tipo | Descripción |
+|---|---|---|
+| `purchase_probability` | float (0–1) | Probabilidad estimada de que la sesión termine en compra |
+| `recommended_action` | string | `cross_selling` (probabilidad > 70%), `retencion` (< 30%) o `sin_accion` (resto) — ver `src/recommender.py` |
+
+### 3. Levantar la demo de Streamlit
+
+En **otra terminal**, con la API corriendo:
+
+```bash
+streamlit run demo_app.py
+```
+
+Abre en `http://localhost:8501`. El sidebar tiene:
+- **Indicadores de navegación** (Page Values, Exit Rate, Bounce Rate) y **perfil** (Mes, Tipo de visitante, Fin de semana) — las variables con más peso en la predicción, a la vista.
+- **"⚙️ Más variables de la sesión"** (colapsado): el resto de las 17 columnas que necesita el modelo, con valores por defecto razonables — no hace falta tocarlas para probar la demo.
+
+Al hacer clic en **"🚀 Predecir y Prescribir"**, la demo llama a `POST /predict` y muestra la probabilidad estimada junto con el panel de acción:
+
+| Acción de la API | Panel en la demo | Cuándo se dispara |
+|---|---|---|
+| `cross_selling` | 🟢 Alta Intención | probabilidad > 70% |
+| `retencion` | 🟠 Usuario Indeciso / En Riesgo | probabilidad < 30% |
+| `sin_accion` | 🔴 Baja Intención (sin acción) | resto |
+
+**Para ver cada caso:** `cross_selling` con `Page Values` alto (~100+) y `Exit Rate`/`Bounce Rate` bajos (~0,01–0,02); `retencion` con `Page Values` bajo y `Exit Rate`/`Bounce Rate` altos (~0,15–0,2).
+
+Si la demo no puede conectarse a la API lo avisa con un error en pantalla (el sidebar siempre muestra la URL configurada). Para apuntar a una API en otro host/puerto: `API_URL=http://otro-host:8000 streamlit run demo_app.py`.
 
 ## 💻 Uso del Pipeline de Datos (src/)
 
