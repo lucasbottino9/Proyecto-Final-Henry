@@ -65,7 +65,8 @@ Proyecto-Final-Henry/
 ├── tests/            # Smoke tests de la API, corridos en CI (Sprint 2)
 │   └── test_api_smoke.py
 ├── .github/workflows/ci.yml  # CI: instala dependencias y corre los smoke tests (Sprint 2)
-├── demo_app.py       # Demo interactiva en Streamlit (consume la API)
+├── demo_app.py       # Demo interactiva en Streamlit (consume la API) — deployable en Streamlit Cloud
+├── render.yaml        # Blueprint de deploy de la API en Render (Sprint 2)
 ├── requirements.txt  # Dependencias del proyecto
 └── README.md         # Documentación principal del repositorio
 ```
@@ -188,6 +189,30 @@ Al hacer clic en **"🚀 Predecir y Prescribir"**, la demo llama a `POST /predic
 **Para ver cada caso:** `cross_selling` con `Page Values` alto (~100+) y `Exit Rate`/`Bounce Rate` bajos (~0,01–0,02); `retencion` con `Page Values` bajo y `Exit Rate`/`Bounce Rate` altos (~0,15–0,2).
 
 Si la demo no puede conectarse a la API lo avisa con un error en pantalla (el sidebar siempre muestra la URL configurada). Para apuntar a una API en otro host/puerto: `API_URL=http://otro-host:8000 streamlit run demo_app.py`.
+
+## 🌐 Deploy en producción (Sprint 2)
+
+La API y la demo se despliegan como dos servicios independientes: la API en Render, la demo en Streamlit Community Cloud, apuntando la segunda a la URL pública de la primera.
+
+### 1. API en Render
+
+1. Crear cuenta en [render.com](https://render.com) con GitHub (no pide tarjeta para el free tier).
+2. **New +** → **Blueprint** → seleccionar el repo `lucasbottino9/Proyecto-Final-Henry`. Render detecta [`render.yaml`](render.yaml) automáticamente (build: `pip install -r requirements.txt`, start: `uvicorn api.main:app --host 0.0.0.0 --port $PORT`, health check: `/health`).
+3. Confirmar el plan **Free** → **Apply**. El primer build tarda unos minutos (instala todas las librerías del proyecto, incluidas las de entrenamiento).
+4. Copiar la URL pública que asigna Render (algo como `https://metric-mindset-api.onrender.com`) y verificar: `curl https://<esa-url>/health` debería devolver `{"status":"ok","model_loaded":true}`.
+
+**Nota:** el free tier de Render "duerme" el servicio tras ~15 minutos sin tráfico; el primer pedido después de eso tarda ~50s en responder mientras arranca de nuevo. Es normal — conviene "despertarlo" pegándole a `/health` un rato antes de la demo en vivo.
+
+### 2. Demo en Streamlit Community Cloud
+
+1. Crear cuenta en [share.streamlit.io](https://share.streamlit.io) con GitHub.
+2. **New app** → seleccionar el repo, branch `main`, main file path: `demo_app.py`.
+3. **Advanced settings** → **Secrets**, pegar (reemplazando por la URL real de Render del paso anterior):
+   ```toml
+   API_URL = "https://metric-mindset-api.onrender.com"
+   ```
+4. **Deploy**. `demo_app.py` lee `API_URL` de `st.secrets` en Streamlit Cloud, o de la variable de entorno del mismo nombre en local/Render (ver `_resolver_api_url()`).
+5. Probar el flujo completo: abrir la URL pública de la demo, cargar una sesión y confirmar que `🚀 Predecir y Prescribir` devuelve una predicción real (no un error de conexión).
 
 ## 💻 Uso del Pipeline de Datos (src/)
 

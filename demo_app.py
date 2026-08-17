@@ -10,7 +10,17 @@ st.set_page_config(
     layout="wide"
 )
 
-API_URL = os.environ.get("API_URL", "http://localhost:8000")
+def _resolver_api_url() -> str:
+    """Streamlit Community Cloud inyecta configuración vía `st.secrets`
+    (`.streamlit/secrets.toml`), no variables de entorno tradicionales; Render
+    y el uso local sí usan `os.environ`. Se prueban ambas fuentes."""
+    try:
+        return st.secrets["API_URL"]
+    except (KeyError, FileNotFoundError):
+        return os.environ.get("API_URL", "http://localhost:8000")
+
+
+API_URL = _resolver_api_url()
 
 # --- CABECERA ---
 st.title("🚀 Demo Interactiva: Predicción de Conversión en Tiempo Real")
