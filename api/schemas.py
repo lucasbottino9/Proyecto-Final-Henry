@@ -77,6 +77,10 @@ class SesionInput(BaseModel):
         }
     }
 
+class FeatureExplanation(BaseModel):
+    feature: str
+    shap_value: float
+    direction: str
 
 class PredictResponse(BaseModel):
     """Respuesta del scoring + motor de prescripción."""
@@ -98,3 +102,6 @@ class PredictResponse(BaseModel):
     reason: str = Field(
         description="Motivo que explica la prescripción generada."
     )
+    top_features: list[FeatureExplanation] = Field( 
+        description="Principales variables que influyeron en la predicción."
+    )   

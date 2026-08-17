@@ -183,7 +183,8 @@ with col2:
                 accion_recomendada = resultado["recommended_action"]
                 prioridad = resultado["priority"]
                 motivo = resultado["reason"]
-
+                top_features = resultado.get("top_features", [])
+                
                 info_incentivo = INFO_POR_ACCION[accion_recomendada]
 
                 # 1. Score del modelo real (vía API)
@@ -200,6 +201,30 @@ with col2:
 
                 st.markdown("**Motivo de la prescripción:**")
                 st.info(motivo)
+
+                st.markdown("### 🧠 ¿Qué influyó en la predicción?")
+
+                st.caption(
+                    "Principales variables identificadas mediante SHAP "
+                    "sobre los estimadores LightGBM."
+                )
+
+                for feature in top_features:
+                    nombre = feature["feature"]
+                    valor = feature["shap_value"]
+                    direccion = feature["direction"]
+
+                    if direccion == "aumenta":
+                        icono = "⬆️"
+                        efecto = "Aumenta la propensión"
+                    else:
+                        icono = "⬇️"
+                        efecto = "Reduce la propensión"
+
+                    st.markdown(
+                    f"{icono} **{nombre}** — {efecto} "
+                    f"(`SHAP: {valor:+.3f}`)"
+                    )
 
                 st.divider()
 

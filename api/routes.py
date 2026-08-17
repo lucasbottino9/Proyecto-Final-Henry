@@ -18,7 +18,7 @@ def predict(sesion: SesionInput) -> PredictResponse:
     """Recibe los datos crudos de una sesión y devuelve la probabilidad de compra
     (`Revenue`) y la acción recomendada por el motor de reglas."""
     try:
-        probabilidad, prescripcion = inference.predecir_sesion(
+        probabilidad, prescripcion, explicacion = inference.predecir_sesion(
             sesion.model_dump()
         )
     except ValueError as exc:
@@ -31,4 +31,5 @@ def predict(sesion: SesionInput) -> PredictResponse:
         recommended_action=prescripcion["accion"],
         priority=prescripcion["prioridad"],
         reason=prescripcion["motivo"],
+        top_features=explicacion,
     )
