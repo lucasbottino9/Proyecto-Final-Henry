@@ -1,22 +1,22 @@
 {
   "modelo": "lightgbm_calibrado_sigmoid",
   "metricas_test": {
-    "precision": 0.7175141242937854,
-    "recall": 0.6649214659685864,
-    "f1": 0.6902173913043478,
-    "roc_auc": 0.9381911617747649,
-    "average_precision": 0.7559546538356597,
-    "brier_score": 0.06775087478868326
+    "precision": 0.7159090909090909,
+    "recall": 0.6596858638743456,
+    "f1": 0.6866485013623979,
+    "roc_auc": 0.9394066148107276,
+    "average_precision": 0.7617381672068503,
+    "brier_score": 0.06728812512156924
   },
   "hiperparametros_base": {
-    "n_estimators": 219,
-    "num_leaves": 46,
-    "max_depth": 6,
-    "learning_rate": 0.021332958766576912,
-    "subsample": 0.7142380141982838,
-    "colsample_bytree": 0.8959361677936495,
-    "reg_alpha": 0.0002250508417879444,
-    "reg_lambda": 8.237978213102949,
-    "min_child_samples": 77
+    "n_estimators": 445,
+    "num_leaves": 177,
+    "max_depth": 4,
+    "learning_rate": 0.010416081019466766,
+    "subsample": 0.8937286854801155,
+    "colsample_bytree": 0.782759056899288,
+    "reg_alpha": 0.3415966976128147,
+    "reg_lambda": 4.7061665323952805e-07,
+    "min_child_samples": 63
   }
 }

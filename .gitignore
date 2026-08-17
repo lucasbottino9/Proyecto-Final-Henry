@@ -33,3 +33,8 @@ catboost_info/
 .coverage
 htmlcov/
 .pytest_cache/
+
+# Tracking local de experimentos (MLflow)
+mlruns/
+mlartifacts/
+mlflow.db

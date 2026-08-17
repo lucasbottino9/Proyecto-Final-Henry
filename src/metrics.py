@@ -39,6 +39,79 @@ def evaluar_modelo(y_true: pd.Series, y_pred: np.ndarray, y_prob: np.ndarray) ->
     }
 
 
+def precision_at_k(y_true: pd.Series, y_prob: np.ndarray, k: int) -> float:
+    """
+    Precision entre las `k` sesiones con mayor probabilidad de compra.
+
+    Simula la situación real de negocio: solo hay presupuesto/capacidad para
+    intervenir (cross-selling o retención) sobre las `k` sesiones más
+    prometedoras, no sobre todo el tráfico.
+
+    Args:
+        y_true: Etiquetas reales (`Revenue`).
+        y_prob: Probabilidad predicha de compra, mismo orden que `y_true`.
+        k: Cantidad de sesiones top a considerar.
+
+    Returns:
+        Proporción de las top-`k` sesiones que efectivamente compraron.
+    """
+    orden = np.argsort(y_prob)[::-1][:k]
+    y_true_arr = np.asarray(y_true)
+    return float(y_true_arr[orden].mean())
+
+
+def recall_at_k(y_true: pd.Series, y_prob: np.ndarray, k: int) -> float:
+    """
+    Recall entre las `k` sesiones con mayor probabilidad de compra.
+
+    Args:
+        y_true: Etiquetas reales (`Revenue`).
+        y_prob: Probabilidad predicha de compra, mismo orden que `y_true`.
+        k: Cantidad de sesiones top a considerar.
+
+    Returns:
+        Proporción de todas las compras reales que quedan capturadas
+        dentro de las top-`k` sesiones.
+    """
+    orden = np.argsort(y_prob)[::-1][:k]
+    y_true_arr = np.asarray(y_true)
+    total_positivos = y_true_arr.sum()
+    if total_positivos == 0:
+        return 0.0
+    return float(y_true_arr[orden].sum() / total_positivos)
+
+
+def evaluar_ranking(
+    y_true: pd.Series, y_prob: np.ndarray, k_pct: list[float] = [0.05, 0.1, 0.15, 0.2, 0.25, 0.3]
+) -> pd.DataFrame:
+    """
+    Tabla de Precision@K / Recall@K para distintos tamaños de intervención.
+
+    Args:
+        y_true: Etiquetas reales (`Revenue`).
+        y_prob: Probabilidad predicha de compra, mismo orden que `y_true`.
+        k_pct: Fracciones del total de sesiones a evaluar como `k` (ej. `0.1`
+            = top 10% de sesiones por probabilidad de compra).
+
+    Returns:
+        DataFrame indexado por `k_pct`, con columnas `k`, `precision_at_k`
+        y `recall_at_k`.
+    """
+    n = len(y_true)
+    filas = []
+    for pct in k_pct:
+        k = max(1, round(n * pct))
+        filas.append(
+            {
+                "k_pct": pct,
+                "k": k,
+                "precision_at_k": precision_at_k(y_true, y_prob, k),
+                "recall_at_k": recall_at_k(y_true, y_prob, k),
+            }
+        )
+    return pd.DataFrame(filas).set_index("k_pct")
+
+
 def comparar_modelos(resultados: dict[str, dict], criterio: str = "roc_auc") -> pd.DataFrame:
     """
     Arma una tabla comparativa a partir de varios resultados de `evaluar_modelo`.

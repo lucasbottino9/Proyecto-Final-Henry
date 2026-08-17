@@ -55,13 +55,16 @@ Proyecto-Final-Henry/
 │   ├── data_loader.py               # Módulo de ingesta de datos
 │   ├── preprocessing.py             # Pipeline de ETL (limpieza, validación)
 │   ├── features.py                  # Feature engineering, split, OHE y escalado
-│   ├── metrics.py                   # Evaluación de modelos (precision/recall/F1/AUC)
+│   ├── metrics.py                   # Evaluación de modelos (precision/recall/F1/AUC, Precision@K/Recall@K)
 │   └── recommender.py               # Motor de recomendación (cross-selling/retención)
 ├── api/              # API FastAPI que sirve el modelo (Sprint 2)
 │   ├── main.py                      # App FastAPI, carga de artefactos al arrancar
 │   ├── routes.py                    # Ruteo: GET /health, POST /predict
 │   ├── schemas.py                   # Schemas Pydantic (SesionInput, PredictResponse)
 │   └── inference.py                 # Carga del modelo + lógica de predicción
+├── tests/            # Smoke tests de la API, corridos en CI (Sprint 2)
+│   └── test_api_smoke.py
+├── .github/workflows/ci.yml  # CI: instala dependencias y corre los smoke tests (Sprint 2)
 ├── demo_app.py       # Demo interactiva en Streamlit (consume la API)
 ├── requirements.txt  # Dependencias del proyecto
 └── README.md         # Documentación principal del repositorio
@@ -361,4 +364,41 @@ Todo el proceso decide por **PR-AUC** (`average_precision`), no F1: el motor de 
 | `cross_selling` (prob. > 70%) | 198 | 8,11% | **85,86%** |
 
 La calibración corrige exactamente el desajuste que motivó evaluarla: con el modelo sin calibrar, `cross_selling` (prob. > 70%) tenía solo ~65% de tasa real de compra, por debajo de su propio umbral. Calibrado, sube a 85,86% — a costa de ser más conservador (menos sesiones caen en `cross_selling`: 198 vs. 434 antes de calibrar), un trade-off razonable para un motor que dispara incentivos con costo real.
+
+### Evaluación de ranking: Precision@K / Recall@K (Sprint 2)
+
+Además de las métricas de clasificación, `src/metrics.py` expone `precision_at_k`/`recall_at_k`/`evaluar_ranking`: ordenan las sesiones de test por probabilidad de compra descendente y miden qué tan efectivas son las top-K para una campaña con presupuesto/capacidad limitada de intervención (no todas las sesiones, solo las K más prometedoras).
+
+**Modelo final (LightGBM calibrado) sobre el test set (2.441 sesiones, 382 compras reales — 15,6%):**
+
+| Top K sesiones | Precision@K | Recall@K |
+|---|---|---|
+| 5% (122) | 86% | 27% |
+| 10% (244) | 80% | 51% |
+| 15% (366) | 70% | 68% |
+| 20% (488) | 60% | 77% |
+| 25% (610) | 54% | 87% |
+| 30% (732) | 47% | 91% |
+
+Lectura de negocio: con capacidad para intervenir solo el 10% de las sesiones, 8 de cada 10 sesiones targeteadas son compradores reales y ya se captura la mitad de todas las compras del período — un criterio objetivo para dimensionar la campaña según presupuesto, en vez de fijar a ojo los umbrales 0,7/0,3 de `asignar_accion`.
+
+### Tracking de experimentos con MLflow (Sprint 2)
+
+`modeling_avanzado.ipynb` registra cada uno de los 10 candidatos evaluados (Secciones 2 a 7) como un run de MLflow: hiperparámetros (para los 3 modelos tuneados con Optuna), métricas de clasificación, y Precision@K/Recall@K al 10% y 20%. El modelo ganador definitivo además queda versionado como artefacto de MLflow, independientemente de si reemplaza o no a `modelo_final.joblib`.
+
+El backend de tracking es un SQLite local (`mlflow.db`, ignorado por git — cada quien genera el suyo al correr el notebook; MLflow 3.x dejó en mantenimiento el filesystem plano `file:./mlruns`). Para explorar las corridas:
+
+```bash
+mlflow ui --backend-store-uri sqlite:///mlflow.db
+```
+
+## 🧪 Tests y CI (Sprint 2)
+
+`tests/test_api_smoke.py` levanta la API completa (con los artefactos reales de `data/models/`, versionados en el repo) y valida `GET /health`, una predicción válida sobre el ejemplo documentado en `SesionInput`, y el rechazo (422) de una categoría no vista en entrenamiento. No reentrena nada — es un smoke test, no una validación de calidad del modelo (eso lo cubre la evaluación de `modeling_avanzado.ipynb`).
+
+`.github/workflows/ci.yml` corre estos tests en cada push/PR a `main` y `certification`: instala `requirements.txt` y ejecuta `pytest tests/`.
+
+```bash
+pytest tests/ -v
+```
 
