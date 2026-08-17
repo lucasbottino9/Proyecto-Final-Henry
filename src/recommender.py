@@ -36,6 +36,110 @@ def asignar_accion(
         np.select(condiciones, valores, default=ACCION_SIN_ACCION), name="accion"
     )
 
+def prescribir_sesion(
+    probabilidad: float,
+    datos_sesion: dict,
+    umbral_alto: float = 0.70,
+    umbral_bajo: float = 0.30,
+) -> dict:
+    """
+    Traduce la probabilidad de compra y las señales de navegación
+    en una prescripción comercial interpretable.
+
+    Los umbrales de comportamiento se basan en la distribución
+    observada del dataset procesado.
+    """
+
+    page_values = float(datos_sesion.get("PageValues", 0))
+    bounce_rates = float(datos_sesion.get("BounceRates", 0))
+    exit_rates = float(datos_sesion.get("ExitRates", 0))
+    product_related = int(datos_sesion.get("ProductRelated", 0))
+    product_duration = float(datos_sesion.get("ProductRelated_Duration", 0))
+
+    # Umbrales derivados del dataset procesado
+    PRODUCT_RELATED_ALTO = 38
+    PRODUCT_DURATION_ALTA = 1477.0
+    BOUNCE_ALTO = 0.0167
+    EXIT_ALTO = 0.0485
+    PAGE_VALUE_ALTO = 35.0
+
+    interes_producto_alto = (
+        product_related >= PRODUCT_RELATED_ALTO
+        or product_duration >= PRODUCT_DURATION_ALTA
+    )
+
+    valor_pagina_alto = page_values >= PAGE_VALUE_ALTO
+
+    riesgo_abandono = (
+        bounce_rates >= BOUNCE_ALTO
+        or exit_rates >= EXIT_ALTO
+    )
+
+    # 1. Alta propensión + señales fuertes
+    if probabilidad >= umbral_alto and (
+        interes_producto_alto or valor_pagina_alto
+    ):
+        return {
+            "accion": "cross_selling",
+            "prioridad": "alta",
+            "motivo": (
+                "Alta probabilidad de compra combinada con fuerte "
+                "interés en productos o PageValues elevado."
+            ),
+        }
+
+    # 2. Alta propensión sin señales adicionales fuertes
+    if probabilidad >= umbral_alto:
+        return {
+            "accion": "upselling",
+            "prioridad": "media",
+            "motivo": (
+                "Alta probabilidad de compra; se propone aumentar "
+                "el valor potencial de la conversión."
+            ),
+        }
+
+    # 3. Baja propensión + señales de abandono
+    if probabilidad < umbral_bajo and riesgo_abandono:
+        return {
+            "accion": "retencion",
+            "prioridad": "alta",
+            "motivo": (
+                "Baja propensión de compra acompañada por señales "
+                "elevadas de rebote o salida."
+            ),
+        }
+
+    # 4. Baja propensión sin señales de abandono fuertes
+    if probabilidad < umbral_bajo:
+        return {
+            "accion": "retencion_suave",
+            "prioridad": "media",
+            "motivo": (
+                "Baja probabilidad de compra, pero sin señales "
+                "críticas de abandono."
+            ),
+        }
+
+    # 5. Propensión intermedia con interés comercial
+    if interes_producto_alto or page_values > 0:
+        return {
+            "accion": "incentivo_suave",
+            "prioridad": "media",
+            "motivo": (
+                "Propensión intermedia con señales de interés "
+                "en productos."
+            ),
+        }
+
+    return {
+        "accion": "sin_accion",
+        "prioridad": "baja",
+        "motivo": (
+            "No se detectan señales suficientes para justificar "
+            "una intervención automática."
+        ),
+    }
 
 def resumen_acciones(acciones: pd.Series, y_true: pd.Series) -> pd.DataFrame:
     """

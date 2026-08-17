@@ -79,11 +79,22 @@ class SesionInput(BaseModel):
 
 
 class PredictResponse(BaseModel):
-    """Respuesta del motor de scoring + recomendación para una sesión."""
+    """Respuesta del scoring + motor de prescripción."""
 
     purchase_probability: float = Field(
-        ge=0, le=1, description="Probabilidad estimada de que la sesión termine en compra (Revenue=1)"
+        ge=0,
+        le=1,
+        description="Probabilidad estimada de compra.",
     )
+
     recommended_action: str = Field(
-        description="Acción sugerida por el motor de recomendación: cross_selling, retencion o sin_accion"
+        description="Acción comercial recomendada."
+    )
+
+    priority: str = Field(
+        description="Prioridad de la intervención: alta, media o baja."
+    )
+
+    reason: str = Field(
+        description="Motivo que explica la prescripción generada."
     )

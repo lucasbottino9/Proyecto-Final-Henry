@@ -86,20 +86,43 @@ INFO_POR_ACCION = {
     "cross_selling": {
         "estado": "Alta Intención",
         "emoji": "🟢",
-        "mensaje": "Usuario con alta propensión a la compra.",
-        "accion": "🔗 **¡Mostrar Recomendaciones de Cross-Selling / Upselling!** (Sin descuento).",
+        "mensaje": "Sesión con alta propensión y señales fuertes de interés.",
+        "accion": "🔗 Mostrar recomendaciones de Cross-Selling.",
     },
+
+    "upselling": {
+        "estado": "Alta Intención",
+        "emoji": "🟢",
+        "mensaje": "Sesión con alta probabilidad de compra.",
+        "accion": "⬆️ Proponer una alternativa premium o de mayor valor.",
+    },
+
     "retencion": {
-        "estado": "Usuario Indeciso / En Riesgo",
+        "estado": "Riesgo de Abandono",
         "emoji": "🟠",
-        "mensaje": "**TRIGGER ACTIVO**: Momento crítico de intervención.",
-        "accion": "🎁 **¡MOSTRAR CUPÓN 15% OFF O ENVÍO GRATIS!**",
+        "mensaje": "Sesión con baja propensión y señales fuertes de abandono.",
+        "accion": "🎁 Mostrar incentivo de retención: cupón, envío gratis u oferta.",
     },
-    "sin_accion": {
+
+    "retencion_suave": {
         "estado": "Baja Intención",
-        "emoji": "🔴",
-        "mensaje": "Usuario sin intención de compra detectable.",
-        "accion": "Sin acción (Ahorro de presupuesto).",
+        "emoji": "🟡",
+        "mensaje": "Sesión con baja propensión, pero sin señales críticas de abandono.",
+        "accion": "💡 Aplicar una intervención suave de retención.",
+    },
+
+    "incentivo_suave": {
+        "estado": "Intención Intermedia",
+        "emoji": "🔵",
+        "mensaje": "Sesión con intención intermedia y señales de interés en productos.",
+        "accion": "✨ Mostrar un incentivo comercial moderado.",
+    },
+
+    "sin_accion": {
+        "estado": "Sin Intervención",
+        "emoji": "⚪",
+        "mensaje": "No se detectan señales suficientes para justificar una acción.",
+        "accion": "Sin acción automática.",
     },
 }
 
@@ -157,19 +180,32 @@ with col2:
                 st.error(f"La API rechazó la sesión: {exc}")
             else:
                 prob_final = resultado["purchase_probability"]
-                info_incentivo = INFO_POR_ACCION[resultado["recommended_action"]]
+                accion_recomendada = resultado["recommended_action"]
+                prioridad = resultado["priority"]
+                motivo = resultado["reason"]
+
+                info_incentivo = INFO_POR_ACCION[accion_recomendada]
 
                 # 1. Score del modelo real (vía API)
                 st.metric(label="Puntaje de Propensión a Compra (`Revenue`)", value=f"{prob_final * 100:.1f}%")
                 st.progress(prob_final)
 
                 # 2. Panel de resultado del motor de prescripción
-                st.warning(f"### {info_incentivo['emoji']} Estado: {info_incentivo['estado']}")
+                st.warning(
+                    f"### {info_incentivo['emoji']} Estado: {info_incentivo['estado']}"
+                )
+
                 st.markdown(info_incentivo["mensaje"])
+                st.markdown(f"**Prioridad de intervención:** `{prioridad.upper()}`")
+
+                st.markdown("**Motivo de la prescripción:**")
+                st.info(motivo)
 
                 st.divider()
 
-                st.success(f"### 🎯 Acción Recomendada: {info_incentivo['accion']}")
+                st.success(
+                    f"### 🎯 Acción Recomendada: {info_incentivo['accion']}"
+                )          
     else:
         st.info("Ingresá los datos de telemetría en la barra lateral y hacé clic en 'Predecir y Prescribir' para simular la sesión.")
 

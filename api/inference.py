@@ -14,7 +14,7 @@ import pandas as pd
 
 from src.features import CARPETA_MODELOS_POR_DEFECTO, crear_features_derivadas
 from src.preprocessing import COLUMNAS_CATEGORICAS
-from src.recommender import asignar_accion
+from src.recommender import prescribir_sesion
 
 RUTA_PREPROCESSOR = CARPETA_MODELOS_POR_DEFECTO / "preprocessor.joblib"
 RUTA_MODELO = CARPETA_MODELOS_POR_DEFECTO / "modelo_final.joblib"
@@ -62,7 +62,7 @@ def validar_categorias(fila: pd.Series) -> None:
         raise ValueError("; ".join(errores))
 
 
-def predecir_sesion(datos_sesion: dict) -> tuple[float, str]:
+def predecir_sesion(datos_sesion: dict) -> tuple[float, dict]:
     """
     Predice la probabilidad de compra y la acción recomendada para una sesión.
 
@@ -87,5 +87,9 @@ def predecir_sesion(datos_sesion: dict) -> tuple[float, str]:
     X = _preprocessor.transform(df)
 
     probabilidad = float(_modelo.predict_proba(X)[0, 1])
-    accion = asignar_accion(np.array([probabilidad])).iloc[0]
-    return probabilidad, accion
+
+    prescripcion = prescribir_sesion(
+        probabilidad=probabilidad,
+        datos_sesion=datos_sesion,
+    )
+    return probabilidad, prescripcion
