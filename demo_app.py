@@ -72,7 +72,9 @@ st.sidebar.caption("Si no responde: `uvicorn api.main:app --reload`")
 def predecir_via_api(payload: dict) -> dict:
     """POST a `/predict`. Lanza `requests.RequestException` (sin conexión) o
     `ValueError` (la API rechazó la sesión, ej. categoría no vista en entrenamiento)."""
-    respuesta = requests.post(f"{API_URL}/predict", json=payload, timeout=10)
+    # timeout alto: el free tier de Render duerme tras ~15 min de inactividad y
+    # tarda hasta ~60s en despertar en el primer pedido.
+    respuesta = requests.post(f"{API_URL}/predict", json=payload, timeout=70)
     if respuesta.status_code != 200:
         detalle = respuesta.json().get("detail", respuesta.text)
         raise ValueError(str(detalle))
@@ -148,7 +150,7 @@ with col2:
     st.subheader("Resultado del Motor Inteligente")
 
     if predecir_btn:
-        with st.spinner("Procesando telemetría y consultando el modelo..."):
+        with st.spinner("Procesando telemetría y consultando el modelo... (puede tardar ~1 min si la API estaba dormida)"):
             payload = {
                 "Administrative": administrative,
                 "Administrative_Duration": administrative_duration,
